@@ -8,49 +8,66 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     <style>
         .container {
-            max-width: 800px;
-            margin: 0 auto;
+            position: relative;
+            height: 100vh;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        .controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
             padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
         .grid {
+            position: absolute;
             display: grid;
             grid-template-columns: repeat(8, 1fr);
-            gap: 2px;
-            background: #eee;
-            padding: 4px;
-            max-width: 400px;
-            margin-bottom: 20px;
+            gap: 1px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 999;
+            width: 240px;
+            height: 240px;
+            pointer-events: none;
         }
         .cell {
-            aspect-ratio: 1;
-            background: white;
-            border: 1px solid #ddd;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(0, 0, 0, 0.2);
         }
         .current {
-            background: #3b82f6;
+            background: rgba(59, 130, 246, 0.6);
+            border: 2px solid rgba(59, 130, 246, 0.8);
         }
         .accuracy {
-            margin: 10px 0;
+            margin: 5px 0;
         }
         .good { color: green; }
         .normal { color: orange; }
         .bad { color: red; }
         #map {
-            height: 400px;
+            height: 100%;
             width: 100%;
-            margin-top: 20px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <button onclick="startTracking()">位置測定を開始</button>
-        <div class="accuracy"></div>
+        <div class="controls">
+            <button onclick="startTracking()">位置測定を開始</button>
+            <div class="accuracy"></div>
+            <div class="position"></div>
+        </div>
+        <div id="map"></div>
         <div class="grid">
             <!-- 8x8=64のセルをJavaScriptで生成 -->
         </div>
-        <div class="position"></div>
-        <div id="map"></div>
     </div>
 
     <script>
@@ -71,13 +88,13 @@
         // 地図の初期化
         function initMap(lat, lng) {
             if (map === null) {
-                map = L.map('map').setView([lat, lng], 18);
+                map = L.map('map').setView([lat, lng], 19);
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     attribution: '© OpenStreetMap contributors'
                 }).addTo(map);
                 marker = L.marker([lat, lng]).addTo(map);
             } else {
-                map.setView([lat, lng], 18);
+                map.setView([lat, lng], 19);
                 marker.setLatLng([lat, lng]);
             }
         }
