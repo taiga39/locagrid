@@ -3,40 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Location Grid with Map</title>
+  <title>Location Grid with Map Only</title>
   <!-- LeafletのCSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     body { margin: 0; padding: 0; }
     #map { height: 400px; } /* 地図表示エリアの高さ */
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(8, 1fr);
-      gap: 2px;
-      background: #eee;
-      padding: 4px;
-      max-width: 400px;
-      margin-top: 10px;
-    }
-    .cell {
-      aspect-ratio: 1;
-      background: white;
-      border: 1px solid #ddd;
-    }
-    .current { background: #3b82f6; }
-    .accuracy { margin: 10px 0; }
-    .good { color: green; }
-    .normal { color: orange; }
-    .bad { color: red; }
+    .accuracy { margin: 10px; }
+    .position { margin: 10px; }
   </style>
 </head>
 <body>
   <button onclick="startTracking()">位置測定を開始</button>
   <div class="accuracy"></div>
   <div id="map"></div>
-  <div class="grid">
-    <!-- 8x8=64セルのHTMLグリッド -->
-  </div>
   <div class="position"></div>
 
   <!-- LeafletのJS -->
@@ -45,16 +25,7 @@
     let basePosition = null;
     let map;
     let gridOverlayGroup = L.layerGroup(); // 地図上のグリッド用レイヤーグループ
-    const GRID_SIZE = 8;
     const CELL_SIZE = 30; // 30メートル四方
-
-    // HTML上のグリッド生成（セルのハイライト用）
-    const gridHTML = document.querySelector('.grid');
-    for (let i = 0; i < GRID_SIZE * GRID_SIZE; i++) {
-      const cell = document.createElement('div');
-      cell.className = 'cell';
-      gridHTML.appendChild(cell);
-    }
 
     function startTracking() {
       if ("geolocation" in navigator) {
@@ -86,33 +57,26 @@
 
     // 地図上に30m四方のグリッドオーバーレイを描画する関数
     function drawGridOverlay(lat, lng) {
-      // 1度あたりのメートル数（緯度の場合）
       const metersPerDegree = 111320;
-      // 30mを度に換算
       const latDiff = CELL_SIZE / metersPerDegree;
       const lngDiff = CELL_SIZE / (metersPerDegree * Math.cos(lat * Math.PI / 180));
 
-      // 以前のグリッドがあれば削除
       gridOverlayGroup.clearLayers();
 
-      // 基準点を左上とし、東（右）方向と南（下）方向に8x8のグリッドを描画
-      for (let i = 0; i < GRID_SIZE; i++) {
-        for (let j = 0; j < GRID_SIZE; j++) {
-          // 各セルの角を計算（左上、右上、右下、左下）
+      // 基準点を左上とみなして、東（右）方向と南（下）方向に8x8のグリッドを描画
+      for (let i = 0; i < 8; i++) {
+        for (let j = 0; j < 8; j++) {
           const bounds = [
             [lat - i * latDiff,       lng + j * lngDiff],
             [lat - i * latDiff,       lng + (j + 1) * lngDiff],
             [lat - (i + 1) * latDiff, lng + (j + 1) * lngDiff],
             [lat - (i + 1) * latDiff, lng + j * lngDiff]
           ];
-          const polygon = L.polygon(bounds, {
+          L.polygon(bounds, {
             color: 'black',
             weight: 1,
             fillOpacity: 0.1
-          });
-          // gridIndexプロパティを付与（必要に応じて利用）
-          polygon.gridIndex = { x: j, y: i };
-          polygon.addTo(gridOverlayGroup);
+          }).addTo(gridOverlayGroup);
         }
       }
       gridOverlayGroup.addTo(map);
@@ -132,35 +96,30 @@
         accuracyClass = 'normal';
         accuracyText = '普通';
       }
-      accuracyDiv.className = 'accuracy ' + accuracyClass;
       accuracyDiv.textContent = `精度: ${Math.round(accuracy)}m (${accuracyText})`;
-
-      // 現在位置と基準点との差（緯度・経度の差）
-      const deltaLng = pos.coords.longitude - basePosition.lng;
-      const deltaLat = basePosition.lat - pos.coords.latitude; // 北上なら正の値になる
-
-      // 30mを度に変換（基準点付近の値を使用）
-      const metersPerDegree = 111320;
-      const lngDegreePerCell = CELL_SIZE / (metersPerDegree * Math.cos(basePosition.lat * Math.PI / 180));
-      const latDegreePerCell = CELL_SIZE / metersPerDegree;
-
-      // グリッド内でのセルの座標（基準点を左上とする）
-      const gridX = Math.floor(deltaLng / lngDegreePerCell);
-      const gridY = Math.floor(deltaLat / latDegreePerCell);
-
-      // HTMLグリッドのハイライト更新
-      document.querySelectorAll('.cell').forEach(cell => cell.classList.remove('current'));
-      if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
-        const index = gridY * GRID_SIZE + gridX;
-        document.querySelectorAll('.cell')[index].classList.add('current');
-        document.querySelector('.position').textContent = `現在位置: グリッド(${gridX}, ${gridY})`;
-      }
 
       // 地図上に現在位置のマーカーを表示／更新
       if (!updatePosition.marker) {
         updatePosition.marker = L.marker([pos.coords.latitude, pos.coords.longitude]).addTo(map);
       } else {
         updatePosition.marker.setLatLng([pos.coords.latitude, pos.coords.longitude]);
+      }
+
+      // 現在位置をグリッド上のどこにいるかを計算して表示
+      const metersPerDegree = 111320;
+      const lngDegreePerCell = CELL_SIZE / (metersPerDegree * Math.cos(basePosition.lat * Math.PI / 180));
+      const latDegreePerCell = CELL_SIZE / metersPerDegree;
+      const deltaLng = pos.coords.longitude - basePosition.lng;
+      const deltaLat = basePosition.lat - pos.coords.latitude; // 北上なら正の値
+
+      const gridX = Math.floor(deltaLng / lngDegreePerCell);
+      const gridY = Math.floor(deltaLat / latDegreePerCell);
+
+      const positionDiv = document.querySelector('.position');
+      if (gridX >= 0 && gridX < 8 && gridY >= 0 && gridY < 8) {
+        positionDiv.textContent = `現在位置: グリッド(${gridX}, ${gridY})`;
+      } else {
+        positionDiv.textContent = `現在位置: グリッド外`;
       }
     }
   </script>
