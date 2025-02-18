@@ -24,26 +24,6 @@
             border-radius: 4px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.2);
         }
-        .grid {
-            position: absolute;
-            display: grid;
-            grid-template-columns: repeat(8, 1fr);
-            gap: 1px;
-            top: 0;
-            left: 0;
-            z-index: 999;
-            width: 240px;
-            height: 240px;
-            pointer-events: none;
-        }
-        .cell {
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(0, 0, 0, 0.2);
-        }
-        .current {
-            background: rgba(59, 130, 246, 0.6);
-            border: 2px solid rgba(59, 130, 246, 0.8);
-        }
         .accuracy {
             margin: 5px 0;
         }
@@ -64,25 +44,15 @@
             <div class="position"></div>
         </div>
         <div id="map"></div>
-        <div class="grid">
-            <!-- 8x8=64のセルをJavaScriptで生成 -->
-        </div>
     </div>
 
     <script>
         let basePosition = null;
         let map = null;
         let marker = null;
+        let gridLayer = null;
         const GRID_SIZE = 8;
         const CELL_SIZE = 30; // 30メートル
-
-        // グリッドの生成
-        const grid = document.querySelector('.grid');
-        for (let i = 0; i < 64; i++) {
-            const cell = document.createElement('div');
-            cell.className = 'cell';
-            grid.appendChild(cell);
-        }
 
         // 地図の初期化
         function initMap(lat, lng) {
@@ -98,6 +68,73 @@
             }
         }
 
+        // グリッドの作成
+        function createGrid(lat, lng) {
+            if (gridLayer) {
+                map.removeLayer(gridLayer);
+            }
+
+            const gridBounds = calculateGridBounds(lat, lng);
+            const gridPolygons = [];
+
+            for (let y = 0; y < GRID_SIZE; y++) {
+                for (let x = 0; x < GRID_SIZE; x++) {
+                    const cellBounds = calculateCellBounds(lat, lng, x, y);
+                    const polygon = L.polygon(cellBounds, {
+                        color: 'black',
+                        weight: 1,
+                        fillColor: 'white',
+                        fillOpacity: 0.1,
+                        className: `grid-cell-${x}-${y}`
+                    });
+                    gridPolygons.push(polygon);
+                }
+            }
+
+            gridLayer = L.layerGroup(gridPolygons).addTo(map);
+        }
+
+        // グリッドの境界を計算
+        function calculateGridBounds(baseLat, baseLng) {
+            const latDiff = (CELL_SIZE * GRID_SIZE) / 111320;
+            const lngDiff = (CELL_SIZE * GRID_SIZE) / (111320 * Math.cos(baseLat * Math.PI / 180));
+            return {
+                north: baseLat,
+                south: baseLat - latDiff,
+                east: baseLng + lngDiff,
+                west: baseLng
+            };
+        }
+
+        // セルの境界を計算
+        function calculateCellBounds(baseLat, baseLng, x, y) {
+            const latDiff = CELL_SIZE / 111320;
+            const lngDiff = CELL_SIZE / (111320 * Math.cos(baseLat * Math.PI / 180));
+            
+            const north = baseLat - (y * latDiff);
+            const south = baseLat - ((y + 1) * latDiff);
+            const west = baseLng + (x * lngDiff);
+            const east = baseLng + ((x + 1) * lngDiff);
+
+            return [
+                [north, west],
+                [north, east],
+                [south, east],
+                [south, west]
+            ];
+        }
+
+        // セルの色を更新
+        function updateCellColor(x, y) {
+            document.querySelectorAll('.grid-cell').forEach(el => 
+                el.style.fillOpacity = '0.1'
+            );
+            const targetCell = document.querySelector(`.grid-cell-${x}-${y}`);
+            if (targetCell) {
+                targetCell.style.fillOpacity = '0.6';
+            }
+        }
+
         function startTracking() {
             const button = document.querySelector('button');
             if ("geolocation" in navigator) {
@@ -105,20 +142,19 @@
                 button.disabled = true;
                 navigator.geolocation.getCurrentPosition(
                     pos => {
-                    basePosition = {
-                        lat: pos.coords.latitude,
-                        lng: pos.coords.longitude
-                    };
-                    
-                    // 地図の初期化
-                    initMap(basePosition.lat, basePosition.lng);
-                    
-                    // 位置の継続的な監視を開始
-                    navigator.geolocation.watchPosition(updatePosition, null, {
-                        enableHighAccuracy: true,
-                        timeout: 5000,
-                        maximumAge: 0
-                    });
+                        basePosition = {
+                            lat: pos.coords.latitude,
+                            lng: pos.coords.longitude
+                        };
+                        
+                        initMap(basePosition.lat, basePosition.lng);
+                        createGrid(basePosition.lat, basePosition.lng);
+                        
+                        navigator.geolocation.watchPosition(updatePosition, null, {
+                            enableHighAccuracy: true,
+                            timeout: 5000,
+                            maximumAge: 0
+                        });
                     },
                     (error) => {
                         button.textContent = "位置測定を開始";
@@ -133,7 +169,6 @@
             const accuracy = pos.coords.accuracy;
             const accuracyDiv = document.querySelector('.accuracy');
             
-            // 精度の表示更新
             let accuracyClass = 'bad';
             let accuracyText = '要注意';
             if (accuracy <= 10) {
@@ -146,21 +181,15 @@
             accuracyDiv.className = `accuracy ${accuracyClass}`;
             accuracyDiv.textContent = `精度: ${Math.round(accuracy)}m (${accuracyText})`;
 
-            // グリッド位置の計算
             const gridX = Math.floor((pos.coords.longitude - basePosition.lng) / (CELL_SIZE / 111320));
             const gridY = Math.floor((pos.coords.latitude - basePosition.lat) / (CELL_SIZE / 111320));
 
-            // 現在位置の表示更新
-            document.querySelectorAll('.cell').forEach(cell => cell.classList.remove('current'));
             if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
-                const index = gridY * GRID_SIZE + gridX;
-                document.querySelectorAll('.cell')[index].classList.add('current');
-                
+                updateCellColor(gridX, gridY);
                 document.querySelector('.position').textContent = 
                     `現在位置: グリッド(${gridX}, ${gridY})`;
             }
 
-            // 地図の更新
             if (marker) {
                 marker.setLatLng([pos.coords.latitude, pos.coords.longitude]);
                 map.panTo([pos.coords.latitude, pos.coords.longitude]);
