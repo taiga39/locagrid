@@ -3,8 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Location Grid</title>
+    <title>Location Grid with Map</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
     <style>
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 10px;
+        }
         .grid {
             display: grid;
             grid-template-columns: repeat(8, 1fr);
@@ -12,6 +19,7 @@
             background: #eee;
             padding: 4px;
             max-width: 400px;
+            margin-bottom: 20px;
         }
         .cell {
             aspect-ratio: 1;
@@ -27,18 +35,28 @@
         .good { color: green; }
         .normal { color: orange; }
         .bad { color: red; }
+        #map {
+            height: 400px;
+            width: 100%;
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
-    <button onclick="startTracking()">位置測定を開始</button>
-    <div class="accuracy"></div>
-    <div class="grid">
-        <!-- 8x8=64のセルをJavaScriptで生成 -->
+    <div class="container">
+        <button onclick="startTracking()">位置測定を開始</button>
+        <div class="accuracy"></div>
+        <div class="grid">
+            <!-- 8x8=64のセルをJavaScriptで生成 -->
+        </div>
+        <div class="position"></div>
+        <div id="map"></div>
     </div>
-    <div class="position"></div>
 
     <script>
         let basePosition = null;
+        let map = null;
+        let marker = null;
         const GRID_SIZE = 8;
         const CELL_SIZE = 30; // 30メートル
 
@@ -50,14 +68,30 @@
             grid.appendChild(cell);
         }
 
+        // 地図の初期化
+        function initMap(lat, lng) {
+            if (map === null) {
+                map = L.map('map').setView([lat, lng], 18);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(map);
+                marker = L.marker([lat, lng]).addTo(map);
+            } else {
+                map.setView([lat, lng], 18);
+                marker.setLatLng([lat, lng]);
+            }
+        }
+
         function startTracking() {
             if ("geolocation" in navigator) {
-                // 初期位置を基準点として設定
                 navigator.geolocation.getCurrentPosition(pos => {
                     basePosition = {
                         lat: pos.coords.latitude,
                         lng: pos.coords.longitude
                     };
+                    
+                    // 地図の初期化
+                    initMap(basePosition.lat, basePosition.lng);
                     
                     // 位置の継続的な監視を開始
                     navigator.geolocation.watchPosition(updatePosition, null, {
@@ -98,6 +132,12 @@
                 
                 document.querySelector('.position').textContent = 
                     `現在位置: グリッド(${gridX}, ${gridY})`;
+            }
+
+            // 地図の更新
+            if (marker) {
+                marker.setLatLng([pos.coords.latitude, pos.coords.longitude]);
+                map.panTo([pos.coords.latitude, pos.coords.longitude]);
             }
         }
     </script>
