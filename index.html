@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Location Grid</title>
+    <style>
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 2px;
+            background: #eee;
+            padding: 4px;
+            max-width: 400px;
+        }
+        .cell {
+            aspect-ratio: 1;
+            background: white;
+            border: 1px solid #ddd;
+        }
+        .current {
+            background: #3b82f6;
+        }
+        .accuracy {
+            margin: 10px 0;
+        }
+        .good { color: green; }
+        .normal { color: orange; }
+        .bad { color: red; }
+    </style>
+</head>
+<body>
+    <button onclick="startTracking()">位置測定を開始</button>
+    <div class="accuracy"></div>
+    <div class="grid">
+        <!-- 8x8=64のセルをJavaScriptで生成 -->
+    </div>
+    <div class="position"></div>
+
+    <script>
+        let basePosition = null;
+        const GRID_SIZE = 8;
+        const CELL_SIZE = 30; // 30メートル
+
+        // グリッドの生成
+        const grid = document.querySelector('.grid');
+        for (let i = 0; i < 64; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            grid.appendChild(cell);
+        }
+
+        function startTracking() {
+            if ("geolocation" in navigator) {
+                // 初期位置を基準点として設定
+                navigator.geolocation.getCurrentPosition(pos => {
+                    basePosition = {
+                        lat: pos.coords.latitude,
+                        lng: pos.coords.longitude
+                    };
+                    
+                    // 位置の継続的な監視を開始
+                    navigator.geolocation.watchPosition(updatePosition, null, {
+                        enableHighAccuracy: true,
+                        timeout: 5000,
+                        maximumAge: 0
+                    });
+                });
+            }
+        }
+
+        function updatePosition(pos) {
+            const accuracy = pos.coords.accuracy;
+            const accuracyDiv = document.querySelector('.accuracy');
+            
+            // 精度の表示更新
+            let accuracyClass = 'bad';
+            let accuracyText = '要注意';
+            if (accuracy <= 10) {
+                accuracyClass = 'good';
+                accuracyText = 'とても良好';
+            } else if (accuracy <= 20) {
+                accuracyClass = 'normal';
+                accuracyText = '普通';
+            }
+            accuracyDiv.className = `accuracy ${accuracyClass}`;
+            accuracyDiv.textContent = `精度: ${Math.round(accuracy)}m (${accuracyText})`;
+
+            // グリッド位置の計算
+            const gridX = Math.floor((pos.coords.longitude - basePosition.lng) / (CELL_SIZE / 111320));
+            const gridY = Math.floor((pos.coords.latitude - basePosition.lat) / (CELL_SIZE / 111320));
+
+            // 現在位置の表示更新
+            document.querySelectorAll('.cell').forEach(cell => cell.classList.remove('current'));
+            if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
+                const index = gridY * GRID_SIZE + gridX;
+                document.querySelectorAll('.cell')[index].classList.add('current');
+                
+                document.querySelector('.position').textContent = 
+                    `現在位置: グリッド(${gridX}, ${gridY})`;
+            }
+        }
+    </script>
+</body>
+</html>
