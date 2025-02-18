@@ -3,14 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Location Grid with Map Only</title>
+  <title>Location Grid with Map Only - Highlight Current Cell</title>
   <!-- LeafletのCSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     body { margin: 0; padding: 0; }
     #map { height: 400px; } /* 地図表示エリアの高さ */
-    .accuracy { margin: 10px; }
-    .position { margin: 10px; }
+    .accuracy, .position { margin: 10px; }
   </style>
 </head>
 <body>
@@ -26,10 +25,11 @@
     let map;
     let gridOverlayGroup = L.layerGroup(); // 地図上のグリッド用レイヤーグループ
     const CELL_SIZE = 30; // 30メートル四方
+    const GRID_SIZE = 8;
+    const gridPolygons = []; // 各セルのポリゴンを保存する配列
 
     function startTracking() {
       if ("geolocation" in navigator) {
-        // 初回位置取得で基準点を設定
         navigator.geolocation.getCurrentPosition(pos => {
           basePosition = {
             lat: pos.coords.latitude,
@@ -61,22 +61,30 @@
       const latDiff = CELL_SIZE / metersPerDegree;
       const lngDiff = CELL_SIZE / (metersPerDegree * Math.cos(lat * Math.PI / 180));
 
+      // 既存のグリッドをクリア
       gridOverlayGroup.clearLayers();
+      gridPolygons.length = 0; // 配列をクリア
 
       // 基準点を左上とみなして、東（右）方向と南（下）方向に8x8のグリッドを描画
-      for (let i = 0; i < 8; i++) {
-        for (let j = 0; j < 8; j++) {
+      for (let i = 0; i < GRID_SIZE; i++) {
+        for (let j = 0; j < GRID_SIZE; j++) {
           const bounds = [
             [lat - i * latDiff,       lng + j * lngDiff],
             [lat - i * latDiff,       lng + (j + 1) * lngDiff],
             [lat - (i + 1) * latDiff, lng + (j + 1) * lngDiff],
             [lat - (i + 1) * latDiff, lng + j * lngDiff]
           ];
-          L.polygon(bounds, {
+          const polygon = L.polygon(bounds, {
             color: 'black',
             weight: 1,
-            fillOpacity: 0.1
-          }).addTo(gridOverlayGroup);
+            fillOpacity: 0.1,
+            fillColor: 'gray'
+          });
+          // セルの位置情報をプロパティに追加
+          polygon.gridX = j;
+          polygon.gridY = i;
+          polygon.addTo(gridOverlayGroup);
+          gridPolygons.push(polygon);
         }
       }
       gridOverlayGroup.addTo(map);
@@ -116,10 +124,29 @@
       const gridY = Math.floor(deltaLat / latDegreePerCell);
 
       const positionDiv = document.querySelector('.position');
-      if (gridX >= 0 && gridX < 8 && gridY >= 0 && gridY < 8) {
+      if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
         positionDiv.textContent = `現在位置: グリッド(${gridX}, ${gridY})`;
       } else {
         positionDiv.textContent = `現在位置: グリッド外`;
+      }
+
+      // グリッドのセルの色を更新（全セルを初期状態にリセット）
+      gridPolygons.forEach(polygon => {
+        polygon.setStyle({
+          fillOpacity: 0.1,
+          fillColor: 'gray'
+        });
+      });
+      // 現在のセルがグリッド内なら、そのセルの色を変更してハイライト
+      if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
+        gridPolygons.forEach(polygon => {
+          if (polygon.gridX === gridX && polygon.gridY === gridY) {
+            polygon.setStyle({
+              fillOpacity: 0.5,
+              fillColor: 'blue'
+            });
+          }
+        });
       }
     }
   </script>
