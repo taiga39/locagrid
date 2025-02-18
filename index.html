@@ -3,17 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Location Grid with Map Only - Highlight Current Cell</title>
+  <title>9x9 Grid with Centered Pin and Status Button</title>
   <!-- LeafletのCSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     body { margin: 0; padding: 0; }
-    #map { height: 400px; } /* 地図表示エリアの高さ */
+    #map { height: 400px; }
     .accuracy, .position { margin: 10px; }
   </style>
 </head>
 <body>
-  <button onclick="startTracking()">位置測定を開始</button>
+  <button id="startButton" onclick="startTracking()">位置測定を開始</button>
   <div class="accuracy"></div>
   <div id="map"></div>
   <div class="position"></div>
@@ -25,10 +25,16 @@
     let map;
     let gridOverlayGroup = L.layerGroup(); // 地図上のグリッド用レイヤーグループ
     const CELL_SIZE = 30; // 30メートル四方
-    const GRID_SIZE = 8;
+    const GRID_SIZE = 9; // 9x9のグリッド
     const gridPolygons = []; // 各セルのポリゴンを保存する配列
+    let topLeftLat, topLeftLng, latDiff, lngDiff; // グリッド描画用の共通変数
 
     function startTracking() {
+      const startButton = document.getElementById('startButton');
+      // ボタンを「取得中」に変更し、再度クリックできないようにする
+      startButton.textContent = "位置情報取得中...";
+      startButton.disabled = true;
+
       if ("geolocation" in navigator) {
         navigator.geolocation.getCurrentPosition(pos => {
           basePosition = {
@@ -36,43 +42,55 @@
             lng: pos.coords.longitude
           };
 
+          // 1セル分の緯度経度差を計算
+          const metersPerDegree = 111320;
+          latDiff = CELL_SIZE / metersPerDegree;
+          lngDiff = CELL_SIZE / (metersPerDegree * Math.cos(basePosition.lat * Math.PI / 180));
+          
+          // グリッドの中心に basePosition を配置するためのトップレフト座標
+          const centerIndex = (GRID_SIZE - 1) / 2; // 例: 4の場合（0-indexed）
+          topLeftLat = basePosition.lat + (centerIndex + 0.5) * latDiff;
+          topLeftLng = basePosition.lng - (centerIndex + 0.5) * lngDiff;
+
           // Leaflet地図の初期化（ズームレベル19）
           map = L.map('map').setView([basePosition.lat, basePosition.lng], 19);
           L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors'
           }).addTo(map);
 
-          // 30m四方のグリッドオーバーレイを地図上に描画
-          drawGridOverlay(basePosition.lat, basePosition.lng);
+          // 9x9のグリッドオーバーレイを描画
+          drawGridOverlay();
 
+          // 初期位置取得後、ボタンの表示を「取得済み」に変更
+          startButton.textContent = "位置測定中";
+          
           // 位置の継続監視を開始
           navigator.geolocation.watchPosition(updatePosition, null, {
             enableHighAccuracy: true,
             timeout: 5000,
             maximumAge: 0
           });
+        }, err => {
+          startButton.textContent = "取得失敗";
+          console.error(err);
         });
       }
     }
 
-    // 地図上に30m四方のグリッドオーバーレイを描画する関数
-    function drawGridOverlay(lat, lng) {
-      const metersPerDegree = 111320;
-      const latDiff = CELL_SIZE / metersPerDegree;
-      const lngDiff = CELL_SIZE / (metersPerDegree * Math.cos(lat * Math.PI / 180));
-
+    // 9x9グリッドの描画
+    function drawGridOverlay() {
       // 既存のグリッドをクリア
       gridOverlayGroup.clearLayers();
       gridPolygons.length = 0; // 配列をクリア
 
-      // 基準点を左上とみなして、東（右）方向と南（下）方向に8x8のグリッドを描画
+      // 左上の座標(topLeftLat, topLeftLng)から9x9のグリッドを描画
       for (let i = 0; i < GRID_SIZE; i++) {
         for (let j = 0; j < GRID_SIZE; j++) {
           const bounds = [
-            [lat - i * latDiff,       lng + j * lngDiff],
-            [lat - i * latDiff,       lng + (j + 1) * lngDiff],
-            [lat - (i + 1) * latDiff, lng + (j + 1) * lngDiff],
-            [lat - (i + 1) * latDiff, lng + j * lngDiff]
+            [topLeftLat - i * latDiff,       topLeftLng + j * lngDiff],
+            [topLeftLat - i * latDiff,       topLeftLng + (j + 1) * lngDiff],
+            [topLeftLat - (i + 1) * latDiff, topLeftLng + (j + 1) * lngDiff],
+            [topLeftLat - (i + 1) * latDiff, topLeftLng + j * lngDiff]
           ];
           const polygon = L.polygon(bounds, {
             color: 'black',
@@ -80,7 +98,7 @@
             fillOpacity: 0.1,
             fillColor: 'gray'
           });
-          // セルの位置情報をプロパティに追加
+          // 各セルの位置情報をプロパティとして保存
           polygon.gridX = j;
           polygon.gridY = i;
           polygon.addTo(gridOverlayGroup);
@@ -95,49 +113,37 @@
       const accuracyDiv = document.querySelector('.accuracy');
 
       // 精度の評価
-      let accuracyClass = 'bad';
       let accuracyText = '要注意';
       if (accuracy <= 10) {
-        accuracyClass = 'good';
         accuracyText = 'とても良好';
       } else if (accuracy <= 20) {
-        accuracyClass = 'normal';
         accuracyText = '普通';
       }
       accuracyDiv.textContent = `精度: ${Math.round(accuracy)}m (${accuracyText})`;
 
-      // 地図上に現在位置のマーカーを表示／更新
-      if (!updatePosition.marker) {
-        updatePosition.marker = L.marker([pos.coords.latitude, pos.coords.longitude]).addTo(map);
-      } else {
-        updatePosition.marker.setLatLng([pos.coords.latitude, pos.coords.longitude]);
-      }
+      // 現在位置とグリッドの左上との緯度経度差を計算
+      const deltaLat = topLeftLat - pos.coords.latitude;
+      const deltaLng = pos.coords.longitude - topLeftLng;
 
-      // 現在位置をグリッド上のどこにいるかを計算して表示
-      const metersPerDegree = 111320;
-      const lngDegreePerCell = CELL_SIZE / (metersPerDegree * Math.cos(basePosition.lat * Math.PI / 180));
-      const latDegreePerCell = CELL_SIZE / metersPerDegree;
-      const deltaLng = pos.coords.longitude - basePosition.lng;
-      const deltaLat = basePosition.lat - pos.coords.latitude; // 北上なら正の値
-
-      const gridX = Math.floor(deltaLng / lngDegreePerCell);
-      const gridY = Math.floor(deltaLat / latDegreePerCell);
+      // グリッド内のセルのインデックスを計算
+      const gridY = Math.floor(deltaLat / latDiff);
+      const gridX = Math.floor(deltaLng / lngDiff);
 
       const positionDiv = document.querySelector('.position');
       if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
-        positionDiv.textContent = `現在位置: グリッド(${gridX}, ${gridY})`;
+        positionDiv.textContent = `現在位置: グリッド(${gridX + 1}, ${gridY + 1})`; // 1-indexed表示
       } else {
         positionDiv.textContent = `現在位置: グリッド外`;
       }
 
-      // グリッドのセルの色を更新（全セルを初期状態にリセット）
+      // 全セルを初期状態にリセット
       gridPolygons.forEach(polygon => {
         polygon.setStyle({
           fillOpacity: 0.1,
           fillColor: 'gray'
         });
       });
-      // 現在のセルがグリッド内なら、そのセルの色を変更してハイライト
+      // ハイライトするセルを更新
       if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
         gridPolygons.forEach(polygon => {
           if (polygon.gridX === gridX && polygon.gridY === gridY) {
@@ -147,6 +153,17 @@
             });
           }
         });
+      }
+
+      // 現在のセルの中央座標を計算
+      const cellCenterLat = topLeftLat - (gridY + 0.5) * latDiff;
+      const cellCenterLng = topLeftLng + (gridX + 0.5) * lngDiff;
+
+      // マーカーの更新（セルの中央に配置）
+      if (!updatePosition.marker) {
+        updatePosition.marker = L.marker([cellCenterLat, cellCenterLng]).addTo(map);
+      } else {
+        updatePosition.marker.setLatLng([cellCenterLat, cellCenterLng]);
       }
     }
   </script>
