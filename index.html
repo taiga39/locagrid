@@ -100,8 +100,12 @@
         }
 
         function startTracking() {
+            const button = document.querySelector('button');
             if ("geolocation" in navigator) {
-                navigator.geolocation.getCurrentPosition(pos => {
+                button.textContent = "位置情報を取得中...";
+                button.disabled = true;
+                navigator.geolocation.getCurrentPosition(
+                    pos => {
                     basePosition = {
                         lat: pos.coords.latitude,
                         lng: pos.coords.longitude
@@ -116,7 +120,13 @@
                         timeout: 5000,
                         maximumAge: 0
                     });
-                });
+                    },
+                    (error) => {
+                        button.textContent = "位置測定を開始";
+                        button.disabled = false;
+                        alert("位置情報の取得に失敗しました。設定で位置情報の利用を許可してください。");
+                    }
+                );
             }
         }
 
