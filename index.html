@@ -19,6 +19,45 @@
       margin: 10px 0;
       display: none;
     }
+    
+    /* マインスイーパーグリッド表示用 */
+    #minesweeperGrid {
+      display: none;
+      margin: 10px auto;
+    }
+    .grid-row {
+      display: flex;
+    }
+    .grid-cell {
+      width: 30px;
+      height: 30px;
+      border: 1px solid #999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      background-color: #ddd;
+    }
+    .revealed {
+      background-color: #eee;
+    }
+    .mine {
+      background-color: #f88;
+    }
+    .flagged {
+      background-color: #faa;
+    }
+    .current-position {
+      border: 2px solid blue;
+    }
+    .number-1 { color: blue; }
+    .number-2 { color: green; }
+    .number-3 { color: red; }
+    .number-4 { color: darkblue; }
+    .number-5 { color: darkred; }
+    .number-6 { color: darkcyan; }
+    .number-7 { color: black; }
+    .number-8 { color: gray; }
   </style>
 </head>
 <body>
@@ -57,6 +96,9 @@
     <span id="minesLeft"></span> | 
     <span id="gameStatus"></span>
   </div>
+  
+  <!-- 下部マインスイーパーグリッド表示 -->
+  <div id="minesweeperGrid"></div>
 
   <!-- LeafletのJS -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
@@ -160,6 +202,10 @@
       // ゲームコントロールを表示
       document.getElementById('gameControls').style.display = 'block';
       document.getElementById('gameInfo').style.display = 'block';
+      document.getElementById('minesweeperGrid').style.display = 'block';
+      
+      // 下部のマインスイーパーグリッドを作成
+      createMinesweeperGridUI();
     }
 
     // グリッド描画
@@ -232,6 +278,7 @@
       });
 
       // 現在位置のセルを取得してハイライト
+      let oldCell = currentCell;
       currentCell = null;
       if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
         gridPolygons.forEach(polygon => {
@@ -247,6 +294,11 @@
             }
           }
         });
+      }
+      
+      // 現在位置が変わったら下部のマインスイーパーグリッド表示も更新
+      if (gridFixed && (oldCell !== currentCell)) {
+        updateMinesweeperGridUI();
       }
 
       // マーカー（ピン）の更新
@@ -351,6 +403,9 @@
       // 残りの地雷数表示を更新
       document.getElementById('minesLeft').textContent = `残り地雷: ${mineCount - flagsUsed}`;
       
+      // 下部のマインスイーパーグリッド表示を更新
+      updateMinesweeperGridUI();
+      
       // 勝利条件チェック：すべての地雷に正しく旗が立っているか
       checkWinCondition();
     }
@@ -367,6 +422,7 @@
         gameOver = true;
         revealAllMines();
         document.getElementById('gameStatus').textContent = 'ゲームオーバー！地雷を踏みました';
+        updateMinesweeperGridUI();
         return;
       }
       
@@ -374,6 +430,9 @@
       if (currentCell.adjacentMines === 0) {
         revealAdjacentCells(currentCell.gridY, currentCell.gridX);
       }
+      
+      // 下部のマインスイーパーグリッド表示を更新
+      updateMinesweeperGridUI();
       
       // 勝利条件チェック
       checkWinCondition();
@@ -479,7 +538,80 @@
         gameWon = true;
         gameOver = true;
         document.getElementById('gameStatus').textContent = 'ゲームクリア！おめでとうございます！';
+        
+        // 全ての地雷に旗を立てる
+        for (const mine of mines) {
+          const index = mine.y * GRID_SIZE + mine.x;
+          if (!gridPolygons[index].isFlagged) {
+            gridPolygons[index].isFlagged = true;
+            flagsUsed++;
+          }
+        }
+        
+        // 下部のマインスイーパーグリッド表示を更新
+        updateMinesweeperGridUI();
       }
+    }
+    
+    // 下部マインスイーパーグリッドUIの作成
+    function createMinesweeperGridUI() {
+      const container = document.getElementById('minesweeperGrid');
+      container.innerHTML = '';
+      
+      for (let y = 0; y < GRID_SIZE; y++) {
+        const rowDiv = document.createElement('div');
+        rowDiv.className = 'grid-row';
+        
+        for (let x = 0; x < GRID_SIZE; x++) {
+          const cell = document.createElement('div');
+          cell.className = 'grid-cell';
+          cell.dataset.x = x;
+          cell.dataset.y = y;
+          rowDiv.appendChild(cell);
+        }
+        
+        container.appendChild(rowDiv);
+      }
+      
+      // 初期状態を反映
+      updateMinesweeperGridUI();
+    }
+    
+    // 下部マインスイーパーグリッドUIの更新
+    function updateMinesweeperGridUI() {
+      if (!gridFixed) return;
+      
+      const cells = document.querySelectorAll('.grid-cell');
+      cells.forEach(cell => {
+        const x = parseInt(cell.dataset.x);
+        const y = parseInt(cell.dataset.y);
+        const index = y * GRID_SIZE + x;
+        const polygon = gridPolygons[index];
+        
+        // セルのクラスをリセット
+        cell.className = 'grid-cell';
+        cell.textContent = '';
+        
+        // 現在位置をハイライト
+        if (currentCell && currentCell.gridX === x && currentCell.gridY === y) {
+          cell.classList.add('current-position');
+        }
+        
+        if (polygon.isRevealed) {
+          cell.classList.add('revealed');
+          
+          if (polygon.isMine) {
+            cell.classList.add('mine');
+            cell.textContent = '💣';
+          } else if (polygon.adjacentMines > 0) {
+            cell.textContent = polygon.adjacentMines;
+            cell.classList.add(`number-${polygon.adjacentMines}`);
+          }
+        } else if (polygon.isFlagged) {
+          cell.classList.add('flagged');
+          cell.textContent = '🚩';
+        }
+      });
     }
   </script>
 </body>
