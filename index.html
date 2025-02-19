@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>暫定グリッド表示＆グリッド開始で固定</title>
+  <title>暫定グリッド表示＆マインスイーパーゲーム（Marker常時表示）</title>
   <!-- LeafletのCSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     body { margin: 0; padding: 0; }
     #map { height: 400px; }
-    .controls { margin: 10px; }
+    .controls, .game-controls { margin: 10px; }
     .accuracy, .position { margin: 10px; }
   </style>
 </head>
@@ -35,6 +35,12 @@
     <button id="startGridButton" onclick="startGrid()" disabled>グリッド開始</button>
   </div>
 
+  <!-- ゲーム操作用ボタン（グリッド固定後に表示） -->
+  <div class="game-controls" id="gameControls" style="display:none;">
+    <button onclick="actionFlag()">旗を立てる</button>
+    <button onclick="actionOpen()">開く</button>
+  </div>
+
   <div class="accuracy"></div>
   <div id="map"></div>
   <div class="position"></div>
@@ -50,6 +56,7 @@
     let topLeftLat, topLeftLng, latDiff, lngDiff; // グリッド描画用の計算値
     let watchId = null;              // 位置監視のID
     let gridFixed = false;           // グリッドが固定されたかどうかのフラグ
+    let currentCell = null;          // プレイヤーが現在いるセル
 
     // ページ読み込み時にデフォルトの地図を表示（例：東京）
     window.addEventListener("DOMContentLoaded", function() {
@@ -59,12 +66,12 @@
       }).addTo(map);
       gridOverlayGroup.addTo(map);
 
-      // グリッド設定のselect boxの変更イベント
+      // select boxの変更で暫定グリッド更新
       document.getElementById('cellSizeSelect').addEventListener('change', updateTentativeGrid);
       document.getElementById('gridSizeSelect').addEventListener('change', updateTentativeGrid);
     });
 
-    // 位置情報取得ボタン押下時
+    // 「場所を取得」ボタン押下時
     function getLocation() {
       const getLocationButton = document.getElementById('getLocationButton');
       getLocationButton.textContent = "位置情報取得中...";
@@ -76,14 +83,22 @@
             lat: pos.coords.latitude,
             lng: pos.coords.longitude
           };
-          // 地図の中心を更新（ズームレベル19）
+          // 地図の中心更新（ズームレベル19）
           map.setView([basePosition.lat, basePosition.lng], 19);
 
           getLocationButton.textContent = "場所取得済み";
-          // 「グリッド開始」ボタンを有効化
           document.getElementById('startGridButton').disabled = false;
-          // 暫定グリッドを表示
+          // 暫定グリッド表示
           updateTentativeGrid();
+
+          // 位置監視を開始（グリッド固定前もMarker更新のために起動）
+          if (watchId === null) {
+            watchId = navigator.geolocation.watchPosition(updatePosition, null, {
+              enableHighAccuracy: true,
+              timeout: 5000,
+              maximumAge: 0
+            });
+          }
         }, err => {
           getLocationButton.textContent = "取得失敗";
           console.error(err);
@@ -93,50 +108,35 @@
 
     // 暫定グリッド更新（グリッド固定前）
     function updateTentativeGrid() {
-      // 位置情報が取得済みでかつまだグリッドが固定されていなければ更新
       if (!basePosition || gridFixed) return;
       
-      // select boxから値を取得
       CELL_SIZE = parseInt(document.getElementById('cellSizeSelect').value, 10);
       GRID_SIZE = parseInt(document.getElementById('gridSizeSelect').value, 10);
-
+      
       const metersPerDegree = 111320;
       latDiff = CELL_SIZE / metersPerDegree;
       lngDiff = CELL_SIZE / (metersPerDegree * Math.cos(basePosition.lat * Math.PI / 180));
 
-      // グリッドの中心をbasePositionに合わせるための左上の座標計算
       const centerIndex = (GRID_SIZE - 1) / 2;
       topLeftLat = basePosition.lat + (centerIndex + 0.5) * latDiff;
       topLeftLng = basePosition.lng - (centerIndex + 0.5) * lngDiff;
 
-      // 暫定グリッド描画
       drawGridOverlay();
     }
 
-    // 「グリッド開始」ボタン押下時（グリッド固定＆位置追跡開始）
+    // 「グリッド開始」ボタン押下時（グリッド固定＆ゲーム開始）
     function startGrid() {
-      // 固定するので以降はselect boxでの変更を無視する
       gridFixed = true;
-      // select boxを無効化
       document.getElementById('cellSizeSelect').disabled = true;
       document.getElementById('gridSizeSelect').disabled = true;
-
-      // 固定時点の値で再描画
-      updateTentativeGrid();
-
-      // 位置監視を開始して、移動に応じたセルのハイライトとピン表示を行う
-      if (watchId === null) {
-        watchId = navigator.geolocation.watchPosition(updatePosition, null, {
-          enableHighAccuracy: true,
-          timeout: 5000,
-          maximumAge: 0
-        });
-      }
-      // 「グリッド開始」ボタンを無効化
       document.getElementById('startGridButton').disabled = true;
+      // 固定時点のグリッド再描画
+      updateTentativeGrid();
+      // マインスイーパー操作用のボタン表示
+      document.getElementById('gameControls').style.display = 'block';
     }
 
-    // グリッドオーバーレイ描画
+    // グリッド描画
     function drawGridOverlay() {
       gridOverlayGroup.clearLayers();
       gridPolygons.length = 0;
@@ -157,13 +157,16 @@
           });
           polygon.gridX = j;
           polygon.gridY = i;
+          // マインスイーパー用の状態（初期状態）
+          polygon.isOpened = false;
+          polygon.isFlagged = false;
           polygon.addTo(gridOverlayGroup);
           gridPolygons.push(polygon);
         }
       }
     }
 
-    // 位置更新時の処理（watchPosition）
+    // 位置更新時の処理
     function updatePosition(pos) {
       const accuracy = pos.coords.accuracy;
       const accuracyDiv = document.querySelector('.accuracy');
@@ -175,11 +178,9 @@
       }
       accuracyDiv.textContent = `精度: ${Math.round(accuracy)}m (${accuracyText})`;
 
-      // 現在位置とグリッド左上との緯度経度差を計算
+      // 現在位置とグリッド左上との差
       const deltaLat = topLeftLat - pos.coords.latitude;
       const deltaLng = pos.coords.longitude - topLeftLng;
-
-      // グリッド内のセルのインデックスを計算（0-indexed）
       const gridY = Math.floor(deltaLat / latDiff);
       const gridX = Math.floor(deltaLng / lngDiff);
 
@@ -190,33 +191,60 @@
         positionDiv.textContent = `現在位置: グリッド外`;
       }
 
-      // すべてのセルのスタイルをリセット
+      // ハイライト更新（グリッド固定前は暫定表示としてのみ利用）
       gridPolygons.forEach(polygon => {
-        polygon.setStyle({
-          fillOpacity: 0.1,
-          fillColor: 'gray'
-        });
+        // 既に開かれているセルは状態を維持
+        if (!polygon.isOpened && !polygon.isFlagged) {
+          polygon.setStyle({ fillOpacity: 0.1, fillColor: 'gray' });
+        }
       });
-      // 現在のセルをハイライト
+      currentCell = null;
       if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
         gridPolygons.forEach(polygon => {
           if (polygon.gridX === gridX && polygon.gridY === gridY) {
-            polygon.setStyle({
-              fillOpacity: 0.5,
-              fillColor: 'blue'
-            });
+            if (!polygon.isOpened && !polygon.isFlagged) {
+              polygon.setStyle({ fillOpacity: 0.5, fillColor: 'blue' });
+            }
+            currentCell = polygon;
           }
         });
       }
-
-      // ピン（マーカー）の表示／更新：セル中央に配置
-      const cellCenterLat = topLeftLat - (gridY + 0.5) * latDiff;
-      const cellCenterLng = topLeftLng + (gridX + 0.5) * lngDiff;
-      if (!updatePosition.marker) {
-        updatePosition.marker = L.marker([cellCenterLat, cellCenterLng]).addTo(map);
+      
+      // Markerの表示／更新
+      // グリッドが確定していればセル中心、暫定なら現在の位置にMarkerを表示
+      let markerLat, markerLng;
+      if (gridFixed && currentCell) {
+        markerLat = topLeftLat - (currentCell.gridY + 0.5) * latDiff;
+        markerLng = topLeftLng + (currentCell.gridX + 0.5) * lngDiff;
       } else {
-        updatePosition.marker.setLatLng([cellCenterLat, cellCenterLng]);
+        markerLat = pos.coords.latitude;
+        markerLng = pos.coords.longitude;
       }
+      if (!updatePosition.marker) {
+        updatePosition.marker = L.marker([markerLat, markerLng]).addTo(map);
+      } else {
+        updatePosition.marker.setLatLng([markerLat, markerLng]);
+      }
+    }
+
+    // マインスイーパー操作：旗を立てる
+    function actionFlag() {
+      if (!currentCell) return;
+      if (currentCell.isOpened) return;
+      currentCell.isFlagged = !currentCell.isFlagged;
+      if (currentCell.isFlagged) {
+        currentCell.setStyle({ fillOpacity: 0.7, fillColor: 'red' });
+      } else {
+        currentCell.setStyle({ fillOpacity: 0.5, fillColor: 'blue' });
+      }
+    }
+
+    // マインスイーパー操作：セルを開く
+    function actionOpen() {
+      if (!currentCell) return;
+      if (currentCell.isFlagged) return;
+      currentCell.isOpened = true;
+      currentCell.setStyle({ fillOpacity: 0.9, fillColor: 'white' });
     }
   </script>
 </body>
