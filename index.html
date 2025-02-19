@@ -8,50 +8,17 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     body { margin: 0; padding: 0; }
-    #map { height: 300px; }
+    #map { height: 400px; }
     .controls { margin: 10px; }
     .accuracy, .position { margin: 10px; }
-    
-    /* マインスイーパー用スタイル */
-    #minesweeperContainer {
+    .game-controls { 
+      margin: 10px; 
       display: none;
-      margin: 10px;
-    }
-    .cell {
-      width: 30px;
-      height: 30px;
-      border: 1px solid #999;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: bold;
-      background-color: #ddd;
-      cursor: pointer;
-    }
-    .revealed {
-      background-color: #eee;
-    }
-    .mine {
-      background-color: #f88;
-    }
-    .grid {
-      display: grid;
-      grid-gap: 1px;
-      background-color: #999;
-      padding: 1px;
-      margin-top: 10px;
     }
     .game-info {
       margin: 10px 0;
+      display: none;
     }
-    .number-1 { color: blue; }
-    .number-2 { color: green; }
-    .number-3 { color: red; }
-    .number-4 { color: darkblue; }
-    .number-5 { color: darkred; }
-    .number-6 { color: darkcyan; }
-    .number-7 { color: black; }
-    .number-8 { color: gray; }
   </style>
 </head>
 <body>
@@ -60,64 +27,77 @@
     <select id="cellSizeSelect">
       <option value="30">30</option>
       <option value="60">60</option>
-      <option value="100">100</option>
+      <option value="100" selected>100</option>
       <option value="500">500</option>
       <option value="1000">1000</option>
     </select>
 
     <label for="gridSizeSelect">グリッドサイズ:</label>
     <select id="gridSizeSelect">
-      <option value="9">9×9</option>
+      <option value="9" selected>9×9</option>
       <option value="17">17×17</option>
       <option value="31">31×31</option>
     </select>
 
-    <button id="startButton" onclick="startTracking()">位置測定を開始</button>
+    <button id="getLocationButton" onclick="getLocation()">場所を取得</button>
+    <button id="startGridButton" onclick="startGrid()" disabled>グリッド開始</button>
   </div>
 
   <div class="accuracy"></div>
   <div id="map"></div>
   <div class="position"></div>
   
-  <!-- マインスイーパーコンテナ -->
-  <div id="minesweeperContainer">
-    <h3>位置測定マインスイーパー</h3>
-    <div class="game-info">
-      <span id="flagsLeft"></span> | 
-      <button id="resetGame">リセット</button>
-    </div>
-    <div id="minesweeperGrid" class="grid"></div>
+  <!-- ゲーム操作用ボタン -->
+  <div class="game-controls" id="gameControls">
+    <button id="flagButton" onclick="actionFlag()">旗を立てる</button>
+    <button id="openButton" onclick="actionOpen()">開く</button>
+  </div>
+
+  <div class="game-info" id="gameInfo">
+    <span id="minesLeft"></span> | 
+    <span id="gameStatus"></span>
   </div>
 
   <!-- LeafletのJS -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
+    // グローバル変数
     let basePosition = null;
     let map;
-    let gridOverlayGroup = L.layerGroup(); // 地図上のグリッド用レイヤーグループ
-    let CELL_SIZE, GRID_SIZE;  // セルサイズ（m）とグリッドサイズ（セル数）
-    const gridPolygons = [];   // 各セルのポリゴンを保存する配列
-    let topLeftLat, topLeftLng, latDiff, lngDiff; // グリッド描画用の共通変数
+    let gridOverlayGroup = L.layerGroup();
+    let CELL_SIZE, GRID_SIZE;
+    const gridPolygons = [];
+    let topLeftLat, topLeftLng, latDiff, lngDiff;
+    let watchId = null;
+    let gridFixed = false;
+    let currentCell = null;
     
     // マインスイーパー用変数
     let mines = [];
-    let gameBoard = [];
     let mineCount = 0;
     let flagsUsed = 0;
     let gameOver = false;
+    let gameWon = false;
     let cellsRevealed = 0;
-    let currentGridPosition = { x: -1, y: -1 };
-    let lastGridPosition = { x: -1, y: -1 };
 
-    function startTracking() {
-      const startButton = document.getElementById('startButton');
-      // ボタンの状態変更
-      startButton.textContent = "位置情報取得中...";
-      startButton.disabled = true;
+    // ページ読み込み時に地図を初期表示
+    window.addEventListener("DOMContentLoaded", function() {
+      map = L.map('map').setView([35.6895, 139.6917], 10);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+      }).addTo(map);
+      gridOverlayGroup.addTo(map);
 
-      // 選択されたセルサイズとグリッドサイズを取得
-      CELL_SIZE = parseInt(document.getElementById('cellSizeSelect').value, 10);
-      GRID_SIZE = parseInt(document.getElementById('gridSizeSelect').value, 10);
+      // select boxの変更イベント
+      document.getElementById('cellSizeSelect').addEventListener('change', updateTentativeGrid);
+      document.getElementById('gridSizeSelect').addEventListener('change', updateTentativeGrid);
+    });
+
+    // 「場所を取得」ボタン押下時
+    function getLocation() {
+      const getLocationButton = document.getElementById('getLocationButton');
+      getLocationButton.textContent = "位置情報取得中...";
+      getLocationButton.disabled = true;
 
       if ("geolocation" in navigator) {
         navigator.geolocation.getCurrentPosition(pos => {
@@ -125,55 +105,68 @@
             lat: pos.coords.latitude,
             lng: pos.coords.longitude
           };
+          // 地図の中心を更新（ズームレベル19）
+          map.setView([basePosition.lat, basePosition.lng], 19);
 
-          // 1セル分の緯度経度差を計算（概算）
-          const metersPerDegree = 111320;
-          latDiff = CELL_SIZE / metersPerDegree;
-          lngDiff = CELL_SIZE / (metersPerDegree * Math.cos(basePosition.lat * Math.PI / 180));
+          getLocationButton.textContent = "場所取得済み";
+          document.getElementById('startGridButton').disabled = false;
           
-          // グリッドの中心に basePosition を配置するための左上の座標計算
-          // 中心セルは ( (GRID_SIZE-1)/2, (GRID_SIZE-1)/2 ) （0-indexed）
-          const centerIndex = (GRID_SIZE - 1) / 2; 
-          // basePositionを中心にするため、左上は basePositionから (centerIndex + 0.5) セル分オフセットする
-          topLeftLat = basePosition.lat + (centerIndex + 0.5) * latDiff;
-          topLeftLng = basePosition.lng - (centerIndex + 0.5) * lngDiff;
-
-          // Leaflet地図の初期化（ズームレベル19）
-          map = L.map('map').setView([basePosition.lat, basePosition.lng], 19);
-          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-          }).addTo(map);
-
-          // 選択したグリッドサイズでオーバーレイ描画
-          drawGridOverlay();
+          // 暫定グリッド表示
+          updateTentativeGrid();
           
-          // マインスイーパーを初期化
-          initializeMinesweeper();
-          document.getElementById('minesweeperContainer').style.display = 'block';
-
-          // 初期位置取得後、ボタンの表示を変更
-          startButton.textContent = "位置測定中";
-          
-          // 位置の継続監視を開始
-          navigator.geolocation.watchPosition(updatePosition, null, {
-            enableHighAccuracy: true,
-            timeout: 5000,
-            maximumAge: 0
-          });
+          // 位置監視開始
+          if (watchId === null) {
+            watchId = navigator.geolocation.watchPosition(updatePosition, null, {
+              enableHighAccuracy: true,
+              timeout: 5000,
+              maximumAge: 0
+            });
+          }
         }, err => {
-          startButton.textContent = "取得失敗";
+          getLocationButton.textContent = "取得失敗";
           console.error(err);
         });
       }
     }
 
-    // 選択されたグリッドサイズでオーバーレイ描画
+    // 暫定グリッド更新
+    function updateTentativeGrid() {
+      if (!basePosition || gridFixed) return;
+      
+      CELL_SIZE = parseInt(document.getElementById('cellSizeSelect').value, 10);
+      GRID_SIZE = parseInt(document.getElementById('gridSizeSelect').value, 10);
+      
+      const metersPerDegree = 111320;
+      latDiff = CELL_SIZE / metersPerDegree;
+      lngDiff = CELL_SIZE / (metersPerDegree * Math.cos(basePosition.lat * Math.PI / 180));
+
+      const centerIndex = (GRID_SIZE - 1) / 2;
+      topLeftLat = basePosition.lat + (centerIndex + 0.5) * latDiff;
+      topLeftLng = basePosition.lng - (centerIndex + 0.5) * lngDiff;
+
+      drawGridOverlay();
+    }
+
+    // 「グリッド開始」ボタン押下時（マインスイーパー開始）
+    function startGrid() {
+      gridFixed = true;
+      document.getElementById('cellSizeSelect').disabled = true;
+      document.getElementById('gridSizeSelect').disabled = true;
+      document.getElementById('startGridButton').disabled = true;
+      
+      // マインスイーパーのゲーム初期化
+      initializeMinesweeperGame();
+      
+      // ゲームコントロールを表示
+      document.getElementById('gameControls').style.display = 'block';
+      document.getElementById('gameInfo').style.display = 'block';
+    }
+
+    // グリッド描画
     function drawGridOverlay() {
-      // 既存のグリッドをクリア
       gridOverlayGroup.clearLayers();
       gridPolygons.length = 0;
 
-      // 左上の座標(topLeftLat, topLeftLng)からGRID_SIZE x GRID_SIZEのグリッドを描画
       for (let i = 0; i < GRID_SIZE; i++) {
         for (let j = 0; j < GRID_SIZE; j++) {
           const bounds = [
@@ -188,21 +181,23 @@
             fillOpacity: 0.1,
             fillColor: 'gray'
           });
-          // 各セルのインデックスを保存（0-indexed）
           polygon.gridX = j;
           polygon.gridY = i;
+          // マインスイーパー用の状態
+          polygon.isRevealed = false;
+          polygon.isFlagged = false;
+          polygon.isMine = false;
+          polygon.adjacentMines = 0;
           polygon.addTo(gridOverlayGroup);
           gridPolygons.push(polygon);
         }
       }
-      gridOverlayGroup.addTo(map);
     }
 
+    // 位置更新時
     function updatePosition(pos) {
       const accuracy = pos.coords.accuracy;
       const accuracyDiv = document.querySelector('.accuracy');
-
-      // 精度の評価
       let accuracyText = '要注意';
       if (accuracy <= 10) {
         accuracyText = 'とても良好';
@@ -211,76 +206,70 @@
       }
       accuracyDiv.textContent = `精度: ${Math.round(accuracy)}m (${accuracyText})`;
 
-      // 現在位置とグリッド左上との緯度経度差を計算
+      // 現在位置とグリッド左上との差を計算
       const deltaLat = topLeftLat - pos.coords.latitude;
       const deltaLng = pos.coords.longitude - topLeftLng;
-
-      // グリッド内のセルのインデックス計算（0-indexed）
       const gridY = Math.floor(deltaLat / latDiff);
       const gridX = Math.floor(deltaLng / lngDiff);
-      
-      // 現在のグリッドポジションを更新
-      currentGridPosition = { x: gridX, y: gridY };
 
+      // 現在位置表示
       const positionDiv = document.querySelector('.position');
       if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
-        // ユーザーには1-indexedで表示
         positionDiv.textContent = `現在位置: グリッド(${gridX + 1}, ${gridY + 1})`;
-        
-        // 位置が変わったらマインスイーパーのセルを自動で開く
-        if (lastGridPosition.x !== currentGridPosition.x || lastGridPosition.y !== currentGridPosition.y) {
-          if (!gameOver && gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
-            revealCell(gridY, gridX);
-          }
-          lastGridPosition = { ...currentGridPosition };
-        }
       } else {
         positionDiv.textContent = `現在位置: グリッド外`;
       }
 
-      // すべてのセルを初期状態にリセット
+      // グリッド内でのハイライト更新
+      // 既に状態が変わったセル（開かれたor旗が立っている）はそのまま表示
       gridPolygons.forEach(polygon => {
-        polygon.setStyle({
-          fillOpacity: 0.1,
-          fillColor: 'gray'
-        });
+        if (!polygon.isRevealed && !polygon.isFlagged) {
+          polygon.setStyle({
+            fillOpacity: 0.1,
+            fillColor: 'gray'
+          });
+        }
       });
-      // ハイライトするセルの色を更新
+
+      // 現在位置のセルを取得してハイライト
+      currentCell = null;
       if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
         gridPolygons.forEach(polygon => {
           if (polygon.gridX === gridX && polygon.gridY === gridY) {
-            // マインスイーパーの状態に応じてセルの色を変更
-            let fillColor = 'blue';
-            if (gameBoard[gridY][gridX].isMine && gameBoard[gridY][gridX].isRevealed) {
-              fillColor = 'red';
-            } else if (gameBoard[gridY][gridX].isRevealed) {
-              fillColor = 'green';
-            } else if (gameBoard[gridY][gridX].isFlagged) {
-              fillColor = 'orange';
-            }
+            currentCell = polygon;
             
-            polygon.setStyle({
-              fillOpacity: 0.5,
-              fillColor: fillColor
-            });
+            // ゲーム開始後かつゲームオーバーでなければ、現在のセルをハイライト
+            if (gridFixed && !gameOver && !polygon.isRevealed && !polygon.isFlagged) {
+              polygon.setStyle({
+                fillOpacity: 0.5,
+                fillColor: 'blue'
+              });
+            }
           }
         });
       }
 
-      // 現在のセルの中央座標を計算
-      const cellCenterLat = topLeftLat - (gridY + 0.5) * latDiff;
-      const cellCenterLng = topLeftLng + (gridX + 0.5) * lngDiff;
-
-      // マーカーの配置／更新（セル中央に表示）
-      if (!updatePosition.marker) {
-        updatePosition.marker = L.marker([cellCenterLat, cellCenterLng]).addTo(map);
-      } else {
-        updatePosition.marker.setLatLng([cellCenterLat, cellCenterLng]);
+      // マーカー（ピン）の更新
+      if (currentCell) {
+        const cellCenterLat = topLeftLat - (gridY + 0.5) * latDiff;
+        const cellCenterLng = topLeftLng + (gridX + 0.5) * lngDiff;
+        
+        if (!updatePosition.marker) {
+          updatePosition.marker = L.marker([cellCenterLat, cellCenterLng]).addTo(map);
+        } else {
+          updatePosition.marker.setLatLng([cellCenterLat, cellCenterLng]);
+        }
+      } else if (!updatePosition.marker && !gridFixed) {
+        // グリッド確定前は、現在位置にマーカーを表示
+        updatePosition.marker = L.marker([pos.coords.latitude, pos.coords.longitude]).addTo(map);
+      } else if (updatePosition.marker && !gridFixed) {
+        // グリッド確定前のマーカー位置更新
+        updatePosition.marker.setLatLng([pos.coords.latitude, pos.coords.longitude]);
       }
     }
-    
-    // マインスイーパー関連の関数
-    function initializeMinesweeper() {
+
+    // マインスイーパーゲーム初期化
+    function initializeMinesweeperGame() {
       // ゲーム変数の初期化
       mineCount = Math.floor(GRID_SIZE * GRID_SIZE * 0.15); // グリッドの約15%を地雷に
       if (mineCount < 10) mineCount = 10; // 最低10個の地雷
@@ -288,40 +277,23 @@
       
       flagsUsed = 0;
       gameOver = false;
+      gameWon = false;
       cellsRevealed = 0;
-      document.getElementById('flagsLeft').textContent = `残り旗: ${mineCount - flagsUsed}`;
+      mines = [];
       
-      // グリッドの初期化
-      createMinesweeperGrid();
-      
-      // イベントリスナー
-      document.getElementById('resetGame').addEventListener('click', initializeMinesweeper);
-    }
-    
-    function createMinesweeperGrid() {
-      const gridContainer = document.getElementById('minesweeperGrid');
-      gridContainer.innerHTML = '';
-      gridContainer.style.gridTemplateColumns = `repeat(${GRID_SIZE}, 30px)`;
-      
-      // ゲームボードの初期化
-      gameBoard = Array(GRID_SIZE).fill().map(() => 
-        Array(GRID_SIZE).fill().map(() => ({
-          isMine: false,
-          isRevealed: false,
-          isFlagged: false,
-          adjacentMines: 0
-        }))
-      );
+      document.getElementById('minesLeft').textContent = `残り地雷: ${mineCount - flagsUsed}`;
+      document.getElementById('gameStatus').textContent = `ゲーム開始！`;
       
       // 地雷の配置
-      mines = [];
       let minesPlaced = 0;
       while (minesPlaced < mineCount) {
         const x = Math.floor(Math.random() * GRID_SIZE);
         const y = Math.floor(Math.random() * GRID_SIZE);
         
-        if (!gameBoard[y][x].isMine) {
-          gameBoard[y][x].isMine = true;
+        // gridPolygonsから該当セルを検索
+        const cellIndex = y * GRID_SIZE + x;
+        if (cellIndex >= 0 && cellIndex < gridPolygons.length && !gridPolygons[cellIndex].isMine) {
+          gridPolygons[cellIndex].isMine = true;
           mines.push({ x, y });
           minesPlaced++;
         }
@@ -330,7 +302,8 @@
       // 隣接する地雷数の計算
       for (let y = 0; y < GRID_SIZE; y++) {
         for (let x = 0; x < GRID_SIZE; x++) {
-          if (gameBoard[y][x].isMine) continue;
+          const cellIndex = y * GRID_SIZE + x;
+          if (gridPolygons[cellIndex].isMine) continue;
           
           let count = 0;
           // 8方向をチェック
@@ -341,147 +314,172 @@
               const nx = x + dx;
               const ny = y + dy;
               
-              if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE && gameBoard[ny][nx].isMine) {
-                count++;
+              if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+                const neighborIndex = ny * GRID_SIZE + nx;
+                if (gridPolygons[neighborIndex].isMine) {
+                  count++;
+                }
               }
             }
           }
-          gameBoard[y][x].adjacentMines = count;
+          gridPolygons[cellIndex].adjacentMines = count;
         }
       }
-      
-      // UIの作成
-      for (let y = 0; y < GRID_SIZE; y++) {
-        for (let x = 0; x < GRID_SIZE; x++) {
-          const cell = document.createElement('div');
-          cell.classList.add('cell');
-          cell.dataset.x = x;
-          cell.dataset.y = y;
-          
-          // 右クリックで旗を立てる
-          cell.addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            if (!gameOver && !gameBoard[y][x].isRevealed) {
-              toggleFlag(y, x);
-            }
-          });
-          
-          // 左クリックでセルを開く（デバッグ用）
-          cell.addEventListener('click', () => {
-            if (!gameOver && !gameBoard[y][x].isFlagged) {
-              revealCell(y, x);
-            }
-          });
-          
-          gridContainer.appendChild(cell);
-        }
-      }
-      
-      updateMinesweeperUI();
     }
-    
-    function revealCell(y, x) {
-      // 範囲外、既に開いている、または旗が立っている場合は何もしない
-      if (y < 0 || y >= GRID_SIZE || x < 0 || x >= GRID_SIZE || 
-          gameBoard[y][x].isRevealed || gameBoard[y][x].isFlagged) {
-        return;
+
+    // マインスイーパー操作：旗を立てる
+    function actionFlag() {
+      if (!gridFixed || !currentCell || gameOver || currentCell.isRevealed) return;
+      
+      // 旗の切り替え
+      currentCell.isFlagged = !currentCell.isFlagged;
+      
+      if (currentCell.isFlagged) {
+        currentCell.setStyle({
+          fillOpacity: 0.7,
+          fillColor: 'red'
+        });
+        flagsUsed++;
+      } else {
+        currentCell.setStyle({
+          fillOpacity: 0.5,
+          fillColor: 'blue'
+        });
+        flagsUsed--;
       }
+      
+      // 残りの地雷数表示を更新
+      document.getElementById('minesLeft').textContent = `残り地雷: ${mineCount - flagsUsed}`;
+      
+      // 勝利条件チェック：すべての地雷に正しく旗が立っているか
+      checkWinCondition();
+    }
+
+    // マインスイーパー操作：セルを開く
+    function actionOpen() {
+      if (!gridFixed || !currentCell || gameOver || currentCell.isRevealed || currentCell.isFlagged) return;
       
       // セルを開く
-      gameBoard[y][x].isRevealed = true;
-      cellsRevealed++;
+      revealCell(currentCell);
       
       // 地雷を踏んだ場合
-      if (gameBoard[y][x].isMine) {
+      if (currentCell.isMine) {
         gameOver = true;
         revealAllMines();
-        alert('ゲームオーバー！地雷を踏みました。');
+        document.getElementById('gameStatus').textContent = 'ゲームオーバー！地雷を踏みました';
         return;
       }
       
       // 空のセル（隣接地雷なし）の場合は周囲を再帰的に開く
-      if (gameBoard[y][x].adjacentMines === 0) {
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            if (dx === 0 && dy === 0) continue;
-            revealCell(y + dy, x + dx);
+      if (currentCell.adjacentMines === 0) {
+        revealAdjacentCells(currentCell.gridY, currentCell.gridX);
+      }
+      
+      // 勝利条件チェック
+      checkWinCondition();
+    }
+    
+    // セルを開く処理
+    function revealCell(cell) {
+      if (cell.isRevealed || cell.isFlagged) return;
+      
+      cell.isRevealed = true;
+      cellsRevealed++;
+      
+      // セルのスタイル更新
+      if (cell.isMine) {
+        cell.setStyle({
+          fillOpacity: 0.8,
+          fillColor: '#ff0000'  // 地雷は赤
+        });
+      } else {
+        let color;
+        if (cell.adjacentMines === 0) {
+          color = '#ffffff';  // 空セルは白
+        } else {
+          // 数字に応じた色
+          const colors = ['#ffffff', '#0000ff', '#008000', '#ff0000', '#000080', '#800000', '#008080', '#000000', '#808080'];
+          color = colors[cell.adjacentMines];
+        }
+        
+        cell.setStyle({
+          fillOpacity: 0.8,
+          fillColor: color
+        });
+        
+        // 数字を表示（適切な方法で描画、この例ではポップアップで）
+        if (cell.adjacentMines > 0) {
+          if (cell._popup) {
+            cell.unbindPopup();
+          }
+          cell.bindPopup(cell.adjacentMines.toString(), {
+            closeButton: false,
+            autoClose: false,
+            className: 'mine-number'
+          }).openPopup();
+        }
+      }
+    }
+    
+    // 周囲のセルを再帰的に開く
+    function revealAdjacentCells(y, x) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          
+          const nx = x + dx;
+          const ny = y + dy;
+          
+          if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE) {
+            const neighborIndex = ny * GRID_SIZE + nx;
+            const neighborCell = gridPolygons[neighborIndex];
+            
+            if (!neighborCell.isRevealed && !neighborCell.isFlagged) {
+              revealCell(neighborCell);
+              
+              // 空セルなら再帰的に周囲も開く
+              if (neighborCell.adjacentMines === 0) {
+                revealAdjacentCells(ny, nx);
+              }
+            }
           }
         }
       }
-      
-      // 勝利条件チェック: 地雷以外のすべてのセルが開かれたか
-      if (cellsRevealed === GRID_SIZE * GRID_SIZE - mineCount && !gameOver) {
-        gameOver = true;
-        // すべての地雷に旗を立てる
-        for (const mine of mines) {
-          if (!gameBoard[mine.y][mine.x].isFlagged) {
-            gameBoard[mine.y][mine.x].isFlagged = true;
-            flagsUsed++;
-          }
-        }
-        alert('おめでとうございます！すべての安全なマスを開きました。');
-      }
-      
-      updateMinesweeperUI();
     }
     
-    function toggleFlag(y, x) {
-      if (gameBoard[y][x].isFlagged) {
-        // 旗を外す
-        gameBoard[y][x].isFlagged = false;
-        flagsUsed--;
-      } else if (flagsUsed < mineCount) {
-        // 旗を立てる（残り旗がある場合）
-        gameBoard[y][x].isFlagged = true;
-        flagsUsed++;
-      }
-      
-      document.getElementById('flagsLeft').textContent = `残り旗: ${mineCount - flagsUsed}`;
-      updateMinesweeperUI();
-    }
-    
+    // すべての地雷を表示
     function revealAllMines() {
       for (const mine of mines) {
-        gameBoard[mine.y][mine.x].isRevealed = true;
+        const index = mine.y * GRID_SIZE + mine.x;
+        const mineCell = gridPolygons[index];
+        if (!mineCell.isFlagged) {
+          mineCell.setStyle({
+            fillOpacity: 0.8,
+            fillColor: '#ff0000'  // 地雷は赤
+          });
+        }
       }
-      updateMinesweeperUI();
     }
     
-    function updateMinesweeperUI() {
-      const cells = document.querySelectorAll('.cell');
+    // 勝利条件チェック
+    function checkWinCondition() {
+      // 勝利条件1: すべての非地雷セルが開かれている
+      const nonMineTotal = GRID_SIZE * GRID_SIZE - mineCount;
       
-      cells.forEach(cell => {
-        const x = parseInt(cell.dataset.x);
-        const y = parseInt(cell.dataset.y);
-        const cellData = gameBoard[y][x];
-        
-        // セルのクラスをリセット
-        cell.className = 'cell';
-        cell.textContent = '';
-        
-        if (cellData.isRevealed) {
-          cell.classList.add('revealed');
-          
-          if (cellData.isMine) {
-            cell.classList.add('mine');
-            cell.textContent = '💣';
-          } else if (cellData.adjacentMines > 0) {
-            cell.textContent = cellData.adjacentMines;
-            cell.classList.add(`number-${cellData.adjacentMines}`);
-          }
-        } else if (cellData.isFlagged) {
-          cell.textContent = '🚩';
+      // 勝利条件2: すべての地雷に正しく旗が立っている
+      let correctFlags = 0;
+      for (const mine of mines) {
+        const index = mine.y * GRID_SIZE + mine.x;
+        if (gridPolygons[index].isFlagged) {
+          correctFlags++;
         }
-        
-        // 現在位置のセルをハイライト
-        if (currentGridPosition.x === x && currentGridPosition.y === y) {
-          cell.style.border = '2px solid blue';
-        } else {
-          cell.style.border = '1px solid #999';
-        }
-      });
+      }
       
-      document.getElementById('flagsLeft').textContent = `残り旗: ${mineCount - flagsUsed}`;
+      if (cellsRevealed === nonMineTotal || correctFlags === mineCount) {
+        gameWon = true;
+        gameOver = true;
+        document.getElementById('gameStatus').textContent = 'ゲームクリア！おめでとうございます！';
+      }
     }
   </script>
 </body>
