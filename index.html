@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>位置測定マインスイーパー（改良版）</title>
+  <title>位置測定マインスイーパー（改良版：自分の位置は黄色）</title>
   <!-- LeafletのCSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
@@ -48,8 +48,10 @@
     .flagged {
       background-color: #faa;
     }
+    /* 自分の現在位置は黄色 */
     .current-position {
-      border: 2px solid blue;
+      background-color: yellow !important;
+      border: 2px solid gold;
     }
     .number-1 { color: blue; }
     .number-2 { color: green; }
@@ -93,13 +95,7 @@
     <button id="openButton" onclick="actionOpen()">開く</button>
   </div>
 
-  <!-- ゲーム情報（地雷数、開始文言）は今回は非表示 -->
-  <div class="game-info" id="gameInfo" style="display:none;">
-    <span id="minesLeft"></span> | 
-    <span id="gameStatus"></span>
-  </div>
-  
-  <!-- 下部マインスイーパーグリッド表示（中央寄せ） -->
+  <!-- 下部マインスイーパーグリッド表示 -->
   <div id="minesweeperGrid"></div>
 
   <!-- LeafletのJS -->
@@ -201,7 +197,7 @@
       
       // ゲーム操作用UI表示
       document.getElementById('gameControls').style.display = 'block';
-      // ゲーム情報（地雷数、開始文言）は今回は表示しないので非表示のまま
+      // ゲーム情報は非表示
       
       // 下部のマインスイーパーグリッドUI作成
       createMinesweeperGridUI();
@@ -281,10 +277,11 @@
         gridPolygons.forEach(polygon => {
           if (polygon.gridX === gridX && polygon.gridY === gridY) {
             currentCell = polygon;
+            // 常に自分のいるセルは黄色
             if (gridFixed && !gameOver && !polygon.isRevealed && !polygon.isFlagged) {
               polygon.setStyle({
                 fillOpacity: 0.5,
-                fillColor: 'blue'
+                fillColor: 'yellow'
               });
             }
           }
@@ -326,14 +323,14 @@
         });
         flagsUsed++;
       } else {
+        // 自分のセルは黄色
         currentCell.setStyle({
           fillOpacity: 0.5,
-          fillColor: 'blue'
+          fillColor: 'yellow'
         });
         flagsUsed--;
       }
       
-      // ゲーム情報文言は非表示にしているので更新は行わない
       updateMinesweeperGridUI();
       checkWinCondition();
     }
@@ -353,7 +350,6 @@
       if (currentCell.isMine) {
         gameOver = true;
         revealAllMines();
-        // ゲーム情報の文言は非表示のまま
         updateMinesweeperGridUI();
         return;
       }
@@ -381,7 +377,7 @@
       } else {
         let color;
         if (cell.adjacentMines === 0) {
-          color = 'rgba(255,255,255,0.5)'; // 半透明の白
+          color = 'rgba(255,255,255,0.5)';
         } else {
           const colors = ['rgba(255,255,255,0.5)', '#0000ff', '#008000', '#ff0000', '#000080', '#800000', '#008080', '#000000', '#808080'];
           color = colors[cell.adjacentMines];
@@ -447,7 +443,6 @@
       if (cellsRevealed === nonMineCells || correctFlags === mineCount) {
         gameWon = true;
         gameOver = true;
-        // ゲーム情報文言は非表示のまま
         mines.forEach(mine => {
           const index = mine.y * GRID_SIZE + mine.x;
           if (!gridPolygons[index].isFlagged) {
@@ -471,8 +466,6 @@
       cellsRevealed = 0;
       mines = [];
       
-      // 地雷数とゲーム開始の文言は非表示にするので、更新しない
-      
       let minesPlaced = 0;
       
       // 安全域：最初のセルとその8方向
@@ -487,7 +480,6 @@
         const x = Math.floor(Math.random() * GRID_SIZE);
         const y = Math.floor(Math.random() * GRID_SIZE);
         
-        // 安全域に含まれる場合はスキップ
         if (safeZone.some(pos => pos.x === x && pos.y === y)) continue;
         
         const index = y * GRID_SIZE + x;
