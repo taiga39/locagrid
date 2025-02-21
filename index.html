@@ -2,7 +2,11 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <!-- ★追加★ viewport を元に戻す -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
   <title>位置測定マインスイーパー（改良版：自分の位置は黄色）</title>
+  <!-- LeafletのCSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     body { margin: 0; padding: 0; }
@@ -13,11 +17,12 @@
       margin: 10px; 
       display: none;
     }
+    /* リセットボタン用 */
     .reset-controls {
       margin: 10px;
-      display: none;
+      display: none; /* 爆弾を踏んだ後に表示 */
     }
-    /* 下部マインスイーパーグリッド */
+    /* 下部マインスイーパーグリッド表示 */
     #minesweeperGrid {
       display: block;
       margin: 20px auto;
@@ -85,8 +90,9 @@
   <div id="map"></div>
   <div class="position"></div>
   
-  <!-- ゲーム操作ボタン -->
+  <!-- ゲーム操作用ボタン -->
   <div class="game-controls" id="gameControls">
+    <!-- ★旗ボタンは最初disabledにしておく（セルを1つ以上開くまで使えない） -->
     <button id="flagButton" disabled>旗を立てる</button>
     <button id="openButton" onclick="actionOpen()">開く</button>
   </div>
@@ -96,10 +102,10 @@
     <button id="resetButton" onclick="resetGame()">リセット</button>
   </div>
 
-  <!-- 下部グリッド -->
+  <!-- 下部マインスイーパーグリッド表示 -->
   <div id="minesweeperGrid"></div>
 
-  <!-- Leaflet -->
+  <!-- LeafletのJS -->
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
   <script>
     // URLパラメータのチェック（デバッグモード）
@@ -125,10 +131,11 @@
     let gameWon = false;
     let cellsRevealed = 0;
     let minesInitialized = false; // 最初のクリックで地雷配置
+
     const flagButton = document.getElementById('flagButton');
     const openButton = document.getElementById('openButton');
 
-    // ページロード時に地図を初期表示
+    // ページ読み込み時
     window.addEventListener("DOMContentLoaded", function() {
       map = L.map('map').setView([35.6895, 139.6917], 10);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -136,10 +143,11 @@
       }).addTo(map);
       gridOverlayGroup.addTo(map);
 
+      // セレクト変更時の暫定更新
       document.getElementById('cellSizeSelect').addEventListener('change', updateTentativeGrid);
       document.getElementById('gridSizeSelect').addEventListener('change', updateTentativeGrid);
 
-      // 旗ボタンクリックイベント
+      // 旗ボタンのクリック
       flagButton.addEventListener('click', actionFlag);
     });
 
@@ -160,7 +168,7 @@
           // 暫定グリッド表示
           updateTentativeGrid();
           
-          // 位置監視開始（Marker更新のため）
+          // watchPosition開始
           if (watchId === null) {
             watchId = navigator.geolocation.watchPosition(updatePosition, null, {
               enableHighAccuracy: true,
@@ -193,7 +201,7 @@
       drawGridOverlay();
     }
 
-    // グリッドオーバーレイ
+    // グリッド描画
     function drawGridOverlay() {
       gridOverlayGroup.clearLayers();
       gridPolygons.length = 0;
@@ -201,10 +209,10 @@
       for (let i = 0; i < GRID_SIZE; i++) {
         for (let j = 0; j < GRID_SIZE; j++) {
           const bounds = [
-            [topLeftLat - i * latDiff, topLeftLng + j * lngDiff],
-            [topLeftLat - i * latDiff, topLeftLng + (j+1)*lngDiff],
-            [topLeftLat - (i+1)*latDiff, topLeftLng + (j+1)*lngDiff],
-            [topLeftLat - (i+1)*latDiff, topLeftLng + j*lngDiff]
+            [topLeftLat - i * latDiff,       topLeftLng + j * lngDiff],
+            [topLeftLat - i * latDiff,       topLeftLng + (j + 1) * lngDiff],
+            [topLeftLat - (i + 1) * latDiff, topLeftLng + (j + 1) * lngDiff],
+            [topLeftLat - (i + 1) * latDiff, topLeftLng + j * lngDiff]
           ];
           const polygon = L.polygon(bounds, {
             color: 'black',
@@ -224,15 +232,17 @@
       }
     }
 
-    // ゲーム開始ボタン
+    // 「ゲームを開始」ボタン
     function startGrid() {
       gridFixed = true;
       document.getElementById('cellSizeSelect').disabled = true;
       document.getElementById('gridSizeSelect').disabled = true;
       document.getElementById('startGridButton').disabled = true;
 
+      // 操作UI表示
       document.getElementById('gameControls').style.display = 'block';
 
+      // 下部UI作成
       createMinesweeperGridUI();
     }
 
@@ -257,16 +267,13 @@
       if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
         positionDiv.textContent = `現在位置: グリッド(${gridX + 1}, ${gridY + 1})`;
       } else {
-        positionDiv.textContent = `現在位置: グリッド外`;
+        positionDiv.textContent = '現在位置: グリッド外';
       }
 
-      // 全セル（未開封＆非旗）を灰色に戻す
-      gridPolygons.forEach(poly => {
-        if (!poly.isRevealed && !poly.isFlagged) {
-          poly.setStyle({
-            fillColor: 'gray',
-            fillOpacity: 0.1
-          });
+      // 未開封・未フラグセルを灰色に戻す
+      gridPolygons.forEach(p => {
+        if (!p.isRevealed && !p.isFlagged) {
+          p.setStyle({ fillColor: 'gray', fillOpacity: 0.1 });
         }
       });
 
@@ -278,14 +285,11 @@
 
         // 現在地セルが未開封・未旗なら黄色
         if (gridFixed && !gameOver && !currentCell.isRevealed && !currentCell.isFlagged) {
-          currentCell.setStyle({
-            fillColor: 'yellow',
-            fillOpacity: 0.5
-          });
+          currentCell.setStyle({ fillColor: 'yellow', fillOpacity: 0.5 });
         }
       }
 
-      if (gridFixed && (oldCell !== currentCell)) {
+      if (gridFixed && oldCell !== currentCell) {
         updateMinesweeperGridUI();
       }
 
@@ -305,11 +309,11 @@
       }
     }
 
-    // 下部グリッドUI作成
+    // 下部マインスイーパーグリッドUI
     function createMinesweeperGridUI() {
       const container = document.getElementById('minesweeperGrid');
       container.innerHTML = '';
-      
+
       for (let y = 0; y < GRID_SIZE; y++) {
         const rowDiv = document.createElement('div');
         rowDiv.className = 'grid-row';
@@ -318,32 +322,34 @@
           cellDiv.className = 'grid-cell';
           cellDiv.dataset.x = x;
           cellDiv.dataset.y = y;
+
+          // デバッグクリック
           if (debugMode) {
-            // デバッグモード: セルクリックで開けるテスト
             cellDiv.addEventListener('click', () => {
               if (gameOver) return;
               const idx = y * GRID_SIZE + x;
-              const p = gridPolygons[idx];
-              if (p.isRevealed || p.isFlagged) return;
+              const poly = gridPolygons[idx];
+              if (poly.isRevealed || poly.isFlagged) return;
               if (!minesInitialized) {
                 initializeMinesweeperGame(x, y);
                 minesInitialized = true;
               }
-              revealCell(p);
-              if (p.isMine) {
+              revealCell(poly);
+              if (poly.isMine) {
                 gameOver = true;
                 revealAllMines();
                 updateMinesweeperGridUI();
                 document.getElementById('resetControls').style.display = 'block';
                 return;
               }
-              if (p.adjacentMines === 0) {
+              if (poly.adjacentMines === 0) {
                 revealAdjacentCells(y, x);
               }
               updateMinesweeperGridUI();
               checkWinCondition();
             });
           }
+
           rowDiv.appendChild(cellDiv);
         }
         container.appendChild(rowDiv);
@@ -351,11 +357,11 @@
       updateMinesweeperGridUI();
     }
 
-    // 下部グリッドUIの更新
+    // 下部UI更新
     function updateMinesweeperGridUI() {
       if (!gridFixed) return;
-
       const cells = document.querySelectorAll('.grid-cell');
+
       cells.forEach(cell => {
         const x = parseInt(cell.dataset.x, 10);
         const y = parseInt(cell.dataset.y, 10);
@@ -365,7 +371,7 @@
         cell.className = 'grid-cell';
         cell.textContent = '';
 
-        // 現在地表示
+        // 現在地
         if (currentCell && currentCell.gridX === x && currentCell.gridY === y) {
           cell.classList.add('current-position');
         }
@@ -388,40 +394,40 @@
         }
       });
 
-      // 旗ボタンの文言を動的に変える
+      // ★旗ボタンの状態を設定（1セル以上開いていない間はdisabled）
       if (!currentCell || currentCell.isRevealed || gameOver) {
-        // そのセルでフラグ操作できない場合 → 一旦「旗を立てる」に戻す or 無効化
-        flagButton.textContent = "旗を立てる";
+        // フラグ操作不可
         flagButton.disabled = true;
+        // 一旦「旗を立てる」に戻す
+        flagButton.textContent = "旗を立てる";
       } else {
-        // 未開封セル：フラグ可能
-        // ただし、まだ一つもセルを開いてなければ disable
+        // まだ1つもセルを開いてない（cellsRevealed === 0）なら旗不可
         if (cellsRevealed === 0) {
-          flagButton.disabled = true; // 一度も開いてない → 旗不可
-        } else {
-          flagButton.disabled = false;
-        }
-
-        // フラグありなら「旗を消す」、なしなら「旗を立てる」
-        if (currentCell.isFlagged) {
-          flagButton.textContent = "旗を消す";
-        } else {
+          flagButton.disabled = true;
           flagButton.textContent = "旗を立てる";
+        } else {
+          // フラグ操作可能
+          flagButton.disabled = false;
+          // currentCell が旗付きかどうかで文言切り替え
+          if (currentCell.isFlagged) {
+            flagButton.textContent = "旗を消す";
+          } else {
+            flagButton.textContent = "旗を立てる";
+          }
         }
       }
     }
 
-    // 旗ボタン押下
+    // 旗切り替え
     function actionFlag() {
       if (!gridFixed || !currentCell || gameOver || currentCell.isRevealed) return;
-
-      // フラグ ON/OFF
       currentCell.isFlagged = !currentCell.isFlagged;
+
       if (currentCell.isFlagged) {
         currentCell.setStyle({ fillOpacity: 0.5, fillColor: 'red' });
         flagsUsed++;
       } else {
-        // 外したら自分のセルは黄色（未開封なら）
+        // 外したら自分のセルは黄色に戻す（未開封なら）
         currentCell.setStyle({ fillOpacity: 0.5, fillColor: 'yellow' });
         flagsUsed--;
       }
@@ -434,12 +440,11 @@
     function actionOpen() {
       if (!gridFixed || !currentCell || gameOver || currentCell.isRevealed || currentCell.isFlagged) return;
 
-      // 初回開封で地雷配置
+      // 最初のセルを開く時に地雷配置
       if (!minesInitialized) {
         initializeMinesweeperGame(currentCell.gridX, currentCell.gridY);
         minesInitialized = true;
       }
-
       revealCell(currentCell);
       if (currentCell.isMine) {
         gameOver = true;
@@ -461,12 +466,6 @@
       cell.isRevealed = true;
       cellsRevealed++;
 
-      // 「初めてセルを開いたら、旗ボタンを有効化」
-      if (cellsRevealed === 1) {
-        // 同じタイミングで updateMinesweeperGridUI() を呼ぶため、
-        // disable 解除のフローはそちらに任せてもOK
-      }
-
       if (cell.isMine) {
         cell.setStyle({ fillOpacity: 0.5, fillColor: '#ff0000' });
       } else {
@@ -482,13 +481,13 @@
       }
     }
 
-    // 周囲を自動開封
+    // 周囲を再帰的に開く
     function revealAdjacentCells(row, col) {
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
+      for (let dy=-1; dy<=1; dy++) {
+        for (let dx=-1; dx<=1; dx++) {
           if (dy===0 && dx===0) continue;
           const ny = row + dy, nx = col + dx;
-          if (ny<0 || ny>=GRID_SIZE || nx<0 || nx>=GRID_SIZE) continue;
+          if (ny<0||ny>=GRID_SIZE||nx<0||nx>=GRID_SIZE) continue;
           const idx = ny*GRID_SIZE + nx;
           const nCell = gridPolygons[idx];
           if (!nCell.isRevealed && !nCell.isFlagged) {
@@ -506,26 +505,24 @@
       mineCount = Math.floor(GRID_SIZE * GRID_SIZE * 0.15);
       if (mineCount < 10) mineCount = 10;
       if (mineCount > 100) mineCount = 100;
-      
+
       flagsUsed = 0;
       gameOver = false;
       gameWon = false;
       cellsRevealed = 0;
       mines = [];
-      
+
       let minesPlaced = 0;
-      
-      // 安全域
       const safeZone = [];
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          safeZone.push({ x: firstX + dx, y: firstY + dy });
+      for (let dy=-1; dy<=1; dy++) {
+        for (let dx=-1; dx<=1; dx++) {
+          safeZone.push({ x: firstX+dx, y: firstY+dy });
         }
       }
-      
+
       while (minesPlaced < mineCount) {
-        const rx = Math.floor(Math.random() * GRID_SIZE);
-        const ry = Math.floor(Math.random() * GRID_SIZE);
+        const rx = Math.floor(Math.random()*GRID_SIZE);
+        const ry = Math.floor(Math.random()*GRID_SIZE);
         if (safeZone.some(pos => pos.x===rx && pos.y===ry)) continue;
         const idx = ry*GRID_SIZE + rx;
         if (!gridPolygons[idx].isMine) {
@@ -535,14 +532,14 @@
         }
       }
 
-      // 隣接地雷数
-      for (let r = 0; r < GRID_SIZE; r++) {
-        for (let c = 0; c < GRID_SIZE; c++) {
+      // 隣接地雷数計算
+      for (let r=0; r<GRID_SIZE; r++){
+        for (let c=0; c<GRID_SIZE; c++){
           const idx = r*GRID_SIZE + c;
           if (gridPolygons[idx].isMine) continue;
           let count = 0;
-          for (let dy=-1; dy<=1; dy++) {
-            for (let dx=-1; dx<=1; dx++) {
+          for (let dy=-1; dy<=1; dy++){
+            for (let dx=-1; dx<=1; dx++){
               if (dy===0 && dx===0) continue;
               const nr = r+dy, nc = c+dx;
               if (nr<0||nr>=GRID_SIZE||nc<0||nc>=GRID_SIZE) continue;
@@ -555,21 +552,18 @@
       }
     }
 
-    // 全地雷表示
+    // 全地雷を表示
     function revealAllMines() {
       mines.forEach(m => {
         const idx = m.y*GRID_SIZE + m.x;
         const mineCell = gridPolygons[idx];
         if (!mineCell.isFlagged) {
-          mineCell.setStyle({
-            fillOpacity: 0.5,
-            fillColor: '#ff0000'
-          });
+          mineCell.setStyle({ fillOpacity: 0.5, fillColor: '#ff0000' });
         }
       });
     }
 
-    // 勝利判定
+    // 勝利条件
     function checkWinCondition() {
       const totalCells = GRID_SIZE * GRID_SIZE;
       const nonMineCells = totalCells - mineCount;
@@ -582,11 +576,10 @@
         }
       });
 
-      // 全非地雷セルを開いた or 全地雷に旗
       if (cellsRevealed === nonMineCells || correctFlags === mineCount) {
         gameWon = true;
         gameOver = true;
-        // 未フラグ地雷に旗をつける
+        // 全地雷に旗付け
         mines.forEach(m => {
           const idx = m.y*GRID_SIZE + m.x;
           if (!gridPolygons[idx].isFlagged) {
