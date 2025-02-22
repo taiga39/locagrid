@@ -183,6 +183,19 @@
         flagButton.addEventListener("click", actionFlag);
       });
 
+      function getZoomLevelForCellSize(cellSize) {
+        // セルサイズ(m)とズームレベルの対応表
+        const zoomLevels = {
+          30: 19, // 30m -> zoom 19
+          60: 18, // 60m -> zoom 18
+          100: 17, // 100m -> zoom 17
+          500: 15, // 500m -> zoom 15
+          1000: 14, // 1000m -> zoom 14
+        };
+
+        return zoomLevels[cellSize] || 17; // デフォルトは17
+      }
+
       // 「現在地を取得」ボタン
       function getLocation() {
         const getLocationButton = document.getElementById("getLocationButton");
@@ -196,7 +209,14 @@
                 lat: pos.coords.latitude,
                 lng: pos.coords.longitude,
               };
-              map.setView([basePosition.lat, basePosition.lng], 19);
+
+              // セルサイズに応じたズームレベルを設定
+              const cellSize = parseInt(
+                document.getElementById("cellSizeSelect").value,
+                10
+              );
+              const zoomLevel = getZoomLevelForCellSize(cellSize);
+              map.setView([basePosition.lat, basePosition.lng], zoomLevel);
 
               getLocationButton.textContent = "場所取得済み";
               document.getElementById("startGridButton").disabled = false;
